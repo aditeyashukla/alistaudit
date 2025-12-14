@@ -12,7 +12,6 @@ import {
   ListChecks,
   Plus,
   RefreshCcw,
-  Share2,
   Settings2,
   Ticket,
   Trash2,
@@ -42,7 +41,6 @@ type Movie = {
 type UserSettings = {
   letterboxd: {
     username: string;
-    rssUrl: string;
     lastSync: Date | null;
   };
   aList: {
@@ -81,7 +79,7 @@ type CalculatedStats = {
 const weeklyQuota = 4;
 const monthlyQuota = 12;
 
-const seededMovies: Movie[] = [
+const demoSeedMovies: Movie[] = [
   {
     id: "m1",
     title: "Dune: Part Two",
@@ -159,10 +157,9 @@ const seededMovies: Movie[] = [
   },
 ];
 
-const initialSettings: UserSettings = {
+const demoSettingsTemplate: UserSettings = {
   letterboxd: {
     username: "cinefan",
-    rssUrl: "https://letterboxd.com/cinefan/rss/",
     lastSync: new Date("2025-01-05T10:00:00"),
   },
   aList: {
@@ -178,6 +175,24 @@ const initialSettings: UserSettings = {
   },
 };
 
+const initialSettings: UserSettings = {
+  letterboxd: {
+    username: "",
+    lastSync: null,
+  },
+  aList: {
+    subscriptionCost: 25.99,
+    startDate: "",
+    avgTicketPrice: 18.5,
+    isActive: false,
+  },
+  preferences: {
+    defaultView: "lifetime",
+    currency: "USD",
+    notifications: true,
+  },
+};
+
 const freshSettings = (): UserSettings => ({
   ...initialSettings,
   letterboxd: { ...initialSettings.letterboxd },
@@ -185,7 +200,38 @@ const freshSettings = (): UserSettings => ({
   preferences: { ...initialSettings.preferences },
 });
 
-const freshMovies = (): Movie[] => seededMovies.map((movie) => ({ ...movie }));
+const demoSettings = (): UserSettings => ({
+  ...demoSettingsTemplate,
+  letterboxd: { ...demoSettingsTemplate.letterboxd },
+  aList: { ...demoSettingsTemplate.aList },
+  preferences: { ...demoSettingsTemplate.preferences },
+});
+
+const freshMovies = (): Movie[] => [];
+const demoMovies = (): Movie[] => demoSeedMovies.map((movie) => ({ ...movie }));
+
+const normalizeLetterboxdUsername = (username: string) =>
+  username.replace(/^@/, "").trim();
+
+const mergeMoviesWithExisting = (incoming: Movie[], existing: Movie[]) => {
+  const existingById = new Map(existing.map((movie) => [movie.id, movie]));
+  const incomingIds = new Set(incoming.map((movie) => movie.id));
+
+  const mergedIncoming = incoming.map((movie) => {
+    const prior = existingById.get(movie.id);
+    if (!prior) return movie;
+    return {
+      ...movie,
+      isAMC: prior.isAMC,
+      addedManually: prior.addedManually,
+      rating: movie.rating ?? prior.rating,
+      notes: prior.notes,
+    };
+  });
+
+  const preserved = existing.filter((movie) => !incomingIds.has(movie.id));
+  return [...mergedIncoming, ...preserved];
+};
 
 type AListStore = {
   movies: Movie[];
@@ -221,8 +267,8 @@ const computePeriodStats = (
   settings: UserSettings,
 ): SavingsBreakdown => {
   const now = new Date();
-  const start = new Date(settings.aList.startDate);
-  const safeStart = Number.isNaN(start.getTime()) ? now : start;
+  const start = settings.aList.startDate ? new Date(settings.aList.startDate) : null;
+  const safeStart = start && !Number.isNaN(start.getTime()) ? start : now;
   const amcMovies = movies.filter((movie) => movie.isAMC);
   const filtered = amcMovies.filter((movie) => {
     const date = new Date(movie.watchDate);
@@ -242,13 +288,16 @@ const computePeriodStats = (
   })();
 
   const monthsActive = Math.max(
-    1,
-    differenceInCalendarMonths(now, periodStart) + 1,
+    settings.aList.isActive ? 1 : 0,
+    settings.aList.isActive
+      ? differenceInCalendarMonths(now, periodStart) + 1
+      : 0,
   );
 
   const ticketValue = filtered.length * settings.aList.avgTicketPrice;
-  const subscriptionCost = monthsActive * settings.aList.subscriptionCost;
-  const savings = ticketValue - subscriptionCost;
+  const subscriptionCost =
+    monthsActive * (settings.aList.isActive ? settings.aList.subscriptionCost : 0);
+  const savings = settings.aList.isActive ? ticketValue - subscriptionCost : 0;
 
   return {
     savings,
@@ -296,6 +345,8 @@ export default function Home() {
   });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [sharePeriod, setSharePeriod] = useState<Period>("lifetime");
   const [sharePreview, setSharePreview] = useState<string | null>(null);
@@ -337,16 +388,22 @@ export default function Home() {
       (monthlyFreeUsed / monthlyQuota) * 100,
     );
 
+    const monthsActiveForDelta =
+      lifetime.monthsActive > 0 ? lifetime.monthsActive : 0;
     const monthlyValueDelta =
-      (amcMovies.length / lifetime.monthsActive) *
-        settings.aList.avgTicketPrice -
-      settings.aList.subscriptionCost;
+      monthsActiveForDelta > 0
+        ? (amcMovies.length / monthsActiveForDelta) *
+            settings.aList.avgTicketPrice -
+          (settings.aList.isActive ? settings.aList.subscriptionCost : 0)
+        : 0;
 
     let breakEvenMonths: number | null = null;
-    if (lifetime.savings >= 0) {
-      breakEvenMonths = 0;
-    } else if (monthlyValueDelta > 0) {
-      breakEvenMonths = Math.ceil(Math.abs(lifetime.savings) / monthlyValueDelta);
+    if (settings.aList.isActive) {
+      if (lifetime.savings >= 0) {
+        breakEvenMonths = 0;
+      } else if (monthlyValueDelta > 0) {
+        breakEvenMonths = Math.ceil(Math.abs(lifetime.savings) / monthlyValueDelta);
+      }
     }
 
     return {
@@ -363,10 +420,27 @@ export default function Home() {
     };
   }, [movies, settings]);
 
+  const effectiveSubscriptionCost = useMemo(
+    () => (settings.aList.isActive ? settings.aList.subscriptionCost : 0),
+    [settings.aList.isActive, settings.aList.subscriptionCost],
+  );
+
+  const ticketsToCover = useMemo(() => {
+    if (!settings.aList.isActive) return 0;
+    if (settings.aList.avgTicketPrice <= 0) return 0;
+    return Math.ceil(effectiveSubscriptionCost / settings.aList.avgTicketPrice);
+  }, [effectiveSubscriptionCost, settings.aList.avgTicketPrice, settings.aList.isActive]);
+
   const startDateDisplay = useMemo(() => {
+    if (!settings.aList.startDate) return null;
     const parsed = new Date(settings.aList.startDate);
-    return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
   }, [settings.aList.startDate]);
+
+  const letterboxdRssUrl = useMemo(() => {
+    const user = normalizeLetterboxdUsername(settings.letterboxd.username);
+    return user ? `https://letterboxd.com/${user}/rss/` : "";
+  }, [settings.letterboxd.username]);
 
   const activePeriod =
     viewMode === "lifetime"
@@ -493,25 +567,69 @@ export default function Home() {
   };
 
   const handleClearData = () => {
-    setMovies(() => []);
-    setSelectedIds(new Set());
-  };
-
-  const handleResetDemo = () => {
     reset();
     setSelectedIds(new Set());
     setViewMode(initialSettings.preferences.defaultView);
+    setSyncStatus(null);
+    setSyncError(null);
   };
 
-  const handleManualSync = () => {
+  const handleLoadDemoData = () => {
+    setMovies(() => demoMovies());
+    setSettings(() => demoSettings());
+    setSelectedIds(new Set());
+    setViewMode(demoSettingsTemplate.preferences.defaultView);
+    setSyncStatus(null);
+    setSyncError(null);
+  };
+
+  const handleManualSync = async () => {
+    const username = normalizeLetterboxdUsername(settings.letterboxd.username);
+
+    if (!username) {
+      setSyncError("Add your Letterboxd username first.");
+      return;
+    }
+
     setIsSyncing(true);
-    setTimeout(() => {
+    setSyncStatus(null);
+    setSyncError(null);
+
+    try {
+      const url = new URL("/api/letterboxd", window.location.origin);
+      url.searchParams.set("username", username);
+
+      const response = await fetch(url.toString(), { cache: "no-store" });
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok || !payload) {
+        throw new Error(
+          payload?.error ?? "Unable to sync Letterboxd right now.",
+        );
+      }
+
+      const incoming = Array.isArray(payload.movies)
+        ? (payload.movies as Movie[])
+        : [];
+      setMovies((prev) => mergeMoviesWithExisting(incoming, prev));
       setSettings((prev) => ({
         ...prev,
         letterboxd: { ...prev.letterboxd, lastSync: new Date() },
       }));
+      setSyncStatus(
+        incoming.length
+          ? `Synced ${incoming.length} Letterboxd diary entr${incoming.length === 1 ? "y" : "ies"}. Mark AMC trips in Movie Manager.`
+          : "No diary entries found to sync yet.",
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unable to sync Letterboxd right now.";
+      setSyncError(message);
+    } finally {
       setIsSyncing(false);
-    }, 600);
+    }
   };
 
   const scrollToManualAdd = () => {
@@ -537,6 +655,13 @@ export default function Home() {
   );
 
   const getShareTone = (savings: number) => {
+    if (savings == 0) {
+      return {
+        headline: "Somehow I broke even... Kind of incredible actually",
+        subtitle: "or maybe I didn't add any movies",
+        subtitle_font:22
+      };
+    }
     if (savings < 0) {
       return {
         headline: "YEOUCH! I think I got scammed by A-List",
@@ -773,8 +898,9 @@ export default function Home() {
     ctx.font = "900 46px 'Space Grotesk', 'Work Sans', sans-serif";
     ctx.fillText(`I went to AMC ${shareTarget.amcCount} times`, centerX, cursorY + 86);
     ctx.font = "700 22px 'Work Sans', 'Space Grotesk', sans-serif";
+    const membershipCost = shareTarget.monthsActive * effectiveSubscriptionCost;
     drawWrappedText(
-      `which should've cost me ${money.format(shareTarget.ticketValue)} in tickets but the A-List membership actually cost me ${money.format(shareTarget.monthsActive * settings.aList.subscriptionCost)}`,
+      `which should've cost me ${money.format(shareTarget.ticketValue)} in tickets but the A-List membership actually cost me ${money.format(membershipCost)}`,
       centerX,
       cursorY + 128,
       blockW - 160,
@@ -832,6 +958,14 @@ export default function Home() {
   const handleShare = async () => {
     setIsSharing(true);
     setShareStatus(null);
+    let blobUrl: string | null = null;
+    const scheduleCleanup = () => {
+      if (!blobUrl) return;
+      const urlToRevoke = blobUrl;
+      blobUrl = null;
+      setTimeout(() => URL.revokeObjectURL(urlToRevoke), 2000);
+    };
+
     try {
       const dataUrl = await createShareImage();
       if (!dataUrl) {
@@ -843,30 +977,43 @@ export default function Home() {
       const blob = await response.blob();
       const filename = `alist-audit-${sharePeriod}.png`;
       const file = new File([blob], filename, { type: "image/png" });
+      blobUrl = URL.createObjectURL(blob);
 
       const shareMessage =
         sharePeriod === "lifetime"
           ? `I've saved ${money.format(shareTarget.savings)} total with AMC A-List.`
           : `I've saved ${money.format(shareTarget.savings)} in the ${shareLabel(sharePeriod).toLowerCase()}.`;
+      const shareTitle = "My AMC A-List savings";
 
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({
           files: [file],
-          title: "My AMC A-List savings",
+          title: shareTitle,
           text: `${shareMessage} Track yours with A-List Audit.`,
         });
         setShareStatus("Shared via your device share sheet.");
+        scheduleCleanup();
+      } else if (navigator.share) {
+        await navigator.share({
+          title: shareTitle,
+          text: `${shareMessage} Track yours with A-List Audit.`,
+          url: blobUrl,
+        });
+        setShareStatus("Shared via your device share sheet.");
+        scheduleCleanup();
       } else {
         const link = document.createElement("a");
         link.href = dataUrl;
         link.download = filename;
         link.click();
         setShareStatus("PNG downloaded — ready to drop into socials.");
+        scheduleCleanup();
       }
     } catch (error) {
       console.error("Share failed", error);
       setShareStatus("Share failed. Save the PNG and try again.");
     } finally {
+      scheduleCleanup();
       setIsSharing(false);
     }
   };
@@ -884,11 +1031,11 @@ export default function Home() {
     void refreshSharePreview();
   };
 
-  const headerBadges = [
-    // { label: "DID YOU KNOW YOU CAN BREAK EVEN AFTER JUST 2 MOVIES??\nok yeah buddy here's how much you actually ended up spending (or saving?) ", color: "bg-[var(--accent-blue)]" },
-    // { label: "Firebase Hooks", color: "bg-[var(--accent-yellow)]" },
-    // { label: "Letterboxd Sync", color: "bg-[var(--accent-salmon)]" },
-  ];
+  // const headerBadges = [
+  //   // { label: "DID YOU KNOW YOU CAN BREAK EVEN AFTER JUST 2 MOVIES??\nok yeah buddy here's how much you actually ended up spending (or saving?) ", color: "bg-[var(--accent-blue)]" },
+  //   // { label: "Firebase Hooks", color: "bg-[var(--accent-yellow)]" },
+  //   // { label: "Letterboxd Sync", color: "bg-[var(--accent-salmon)]" },
+  // ];
 
   const viewModes: { value: Period; label: string }[] = [
     { value: "lifetime", label: "Lifetime" },
@@ -934,7 +1081,7 @@ export default function Home() {
                 DID YOU KNOW YOU CAN BREAK EVEN AFTER JUST 2 MOVIES?? ok yeah buddy here's how much you actually ended up spending (or saving?) 
               </p> */}
             </div>
-            <div className="flex flex-wrap gap-3">
+            {/* <div className="flex flex-wrap gap-3">
               {headerBadges.map((badge) => (
                 <span
                   key={badge.label}
@@ -943,7 +1090,7 @@ export default function Home() {
                   {badge.label}
                 </span>
               ))}
-            </div>
+            </div> */}
             <div className="flex flex-wrap items-center gap-3">
               {tabs.map((tab) => {
                 const Icon = tab.icon;
@@ -1097,6 +1244,149 @@ export default function Home() {
           </div>
         )}
 
+        {activeTab === "dashboard" && (
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <div className="brutal-card p-6 sm:p-8">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.14em]">
+                    Letterboxd Connection
+                  </p>
+                  <h3 className="text-2xl font-black">Sync Inputs</h3>
+                </div>
+                <Link2 size={24} className="stroke-[3px]" />
+              </div>
+              <div className="mt-4 space-y-3">
+                <div>
+                  <label className="text-xs">Username</label>
+                  <input
+                    value={settings.letterboxd.username}
+                    onChange={(event) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        letterboxd: {
+                          ...prev.letterboxd,
+                          username: event.target.value,
+                        },
+                      }))
+                    }
+                  />
+                  <p className="mt-1 text-xs font-semibold text-black/60">
+                    RSS auto: {letterboxdRssUrl || "https://letterboxd.com/yourname/rss/"}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border-[3px] border-black bg-[var(--accent-blue)] px-4 py-3">
+                  <div>
+                    <p className="text-xs font-bold uppercase">Status</p>
+                    <p className="text-sm font-black">
+                      {settings.letterboxd.lastSync
+                        ? `Last synced ${format(settings.letterboxd.lastSync, "MMM d, h:mm a")}`
+                        : "Not synced yet"}
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleManualSync}
+                    disabled={isSyncing}
+                    className="brutal-button bg-black px-3 py-2 text-white"
+                  >
+                    {isSyncing ? "Syncing..." : "Manual Sync"}
+                  </button>
+                </div>
+                {(syncStatus || syncError) && (
+                  <div
+                    className={`rounded-lg border-[3px] px-3 py-2 text-xs font-bold uppercase ${syncError ? "bg-[var(--accent-red)]" : "bg-[var(--accent-mint)]"}`}
+                  >
+                    {syncError ?? syncStatus}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="brutal-card p-6 sm:p-8">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.14em]">
+                    A-List Information
+                  </p>
+                  <h3 className="text-2xl font-black">Plan Details</h3>
+                </div>
+                <Ticket size={24} className="stroke-[3px]" />
+              </div>
+              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="text-xs">Monthly fee</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={settings.aList.subscriptionCost}
+                    onChange={(event) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        aList: {
+                          ...prev.aList,
+                          subscriptionCost: Number(event.target.value),
+                        },
+                      }))
+                    }
+                  />
+                </div>
+                <div>
+                  <label className="text-xs">Avg ticket price</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={settings.aList.avgTicketPrice}
+                    onChange={(event) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        aList: {
+                          ...prev.aList,
+                          avgTicketPrice: Number(event.target.value),
+                        },
+                      }))
+                    }
+                  />
+                </div>
+                <div>
+                  <label className="text-xs">Start date</label>
+                  <input
+                    type="date"
+                    value={settings.aList.startDate}
+                    onChange={(event) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        aList: { ...prev.aList, startDate: event.target.value },
+                      }))
+                    }
+                  />
+                </div>
+                <div className="flex items-center gap-2 sm:col-span-2">
+                  <input
+                    type="checkbox"
+                    checked={settings.aList.isActive}
+                    onChange={(event) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        aList: { ...prev.aList, isActive: event.target.checked },
+                      }))
+                    }
+                    className="h-5 w-5 accent-black"
+                  />
+                  <span className="text-sm font-bold uppercase">
+                    Membership active (bill subscription)
+                  </span>
+                </div>
+                <div className="flex flex-col justify-end">
+                  <label className="text-xs">Months active</label>
+                  <div className="rounded-xl border-[3px] border-black bg-[var(--accent-yellow)] px-4 py-3 text-lg font-black">
+                    {stats.monthsActive}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         <canvas ref={shareCanvasRef} className="hidden" aria-hidden />
 
         {activeTab === "dashboard" && (
@@ -1119,7 +1409,9 @@ export default function Home() {
                     ))}
                   </div>
                   <span className="rounded-full border-[3px] border-black bg-white px-3 py-1 text-xs font-bold uppercase">
-                    Months Active: {stats.monthsActive}
+                    {settings.aList.isActive
+                      ? `Months Active: ${stats.monthsActive}`
+                      : "A-List inactive"}
                   </span>
                 </div>
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -1139,6 +1431,11 @@ export default function Home() {
                     <p className="text-sm font-semibold text-black/70">
                       Savings = AMC Movies × Avg Ticket - Months × Fee
                     </p>
+                    {!settings.aList.isActive && (
+                      <p className="text-xs font-bold uppercase text-black/60">
+                        Turn on Membership active in Settings to calculate savings.
+                      </p>
+                    )}
                   </div>
                   <div className="flex gap-3">
                     <div className="rounded-xl border-[3px] border-black bg-white px-4 py-3 text-center">
@@ -1178,7 +1475,7 @@ export default function Home() {
                       {money.format(stats.lifetime.ticketValue)}
                     </p>
                     <p className="text-sm font-semibold text-black/70">
-                      Fee burn: {money.format(stats.monthsActive * settings.aList.subscriptionCost)}
+                      Fee burn: {money.format(stats.monthsActive * effectiveSubscriptionCost)}
                     </p>
                   </div>
                 </div>
@@ -1244,11 +1541,9 @@ export default function Home() {
                       : `${stats.breakEvenMonths} month${stats.breakEvenMonths > 1 ? "s" : ""} at current pace`}
                 </p>
                 <p className="text-sm font-semibold text-black/70">
-                  Needs about{" "}
-                  {Math.ceil(
-                    settings.aList.subscriptionCost / settings.aList.avgTicketPrice,
-                  )}{" "}
-                  AMC movies monthly to cover subscription.
+                  {settings.aList.isActive && ticketsToCover > 0
+                    ? `Needs about ${ticketsToCover} AMC movies monthly to cover subscription.`
+                    : "Set your plan + avg ticket price to see the break-even target."}
                 </p>
               </div>
             </div>
@@ -1264,6 +1559,14 @@ export default function Home() {
                 <BarChart3 size={26} className="stroke-[3px]" />
               </div>
               <div className="mt-4 space-y-3">
+                <div className="flex justify-between rounded-xl border-[3px] border-black bg-white px-4 py-3">
+                  <span className="text-sm font-bold uppercase">
+                    Membership
+                  </span>
+                  <span className="text-lg font-black">
+                    {settings.aList.isActive ? "Active" : "Inactive"}
+                  </span>
+                </div>
                 <div className="flex justify-between rounded-xl border-[3px] border-black bg-white px-4 py-3">
                   <span className="text-sm font-bold uppercase">
                     Monthly Fee
@@ -1328,7 +1631,9 @@ export default function Home() {
                   <p className="text-xs font-bold uppercase">Active Months</p>
                   <p className="text-2xl font-black">{stats.monthsActive}</p>
                   <p className="text-sm font-semibold text-black/80">
-                    Since {format(startDateDisplay, "MMM yyyy")}
+                    {startDateDisplay
+                      ? `Since ${format(startDateDisplay, "MMM yyyy")}`
+                      : "Set your start date"}
                   </p>
                 </div>
               </div>
@@ -1371,47 +1676,6 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="brutal-card accent-lavender p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-[0.14em]">
-                    Letterboxd Connection
-                  </p>
-                  <h3 className="text-2xl font-black">Sync Status</h3>
-                </div>
-                <RefreshCcw
-                  size={26}
-                  className={`stroke-[3px] ${isSyncing ? "animate-spin" : ""}`}
-                />
-              </div>
-              <div className="mt-4 space-y-3 rounded-xl border-[3px] border-black bg-white px-4 py-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-bold uppercase">Username</span>
-                  <span className="text-sm font-black">@{settings.letterboxd.username}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-bold uppercase">RSS</span>
-                  <span className="text-sm font-black">
-                    {settings.letterboxd.rssUrl}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-bold uppercase">Last Sync</span>
-                  <span className="text-sm font-black">
-                    {settings.letterboxd.lastSync
-                      ? format(settings.letterboxd.lastSync, "MMM d, h:mm a")
-                      : "Never"}
-                  </span>
-                </div>
-                <button
-                  onClick={handleManualSync}
-                  className="brutal-button mt-2 flex w-full items-center justify-center gap-2 bg-black px-4 py-3 text-white"
-                >
-                  <RefreshCcw size={16} />
-                  {isSyncing ? "Syncing..." : "Manual Sync"}
-                </button>
-              </div>
-            </div>
           </div>
         )}
 
@@ -1428,12 +1692,20 @@ export default function Home() {
                   </div>
                   <button
                     onClick={handleManualSync}
+                    disabled={isSyncing}
                     className="brutal-button flex items-center gap-2 bg-[var(--accent-blue)] px-4 py-2"
                   >
                     <RefreshCcw size={16} />
                     Pull Letterboxd
                   </button>
                 </div>
+                {(syncStatus || syncError) && (
+                  <div
+                    className={`mt-3 rounded-lg border-[3px] px-3 py-2 text-xs font-bold uppercase ${syncError ? "bg-[var(--accent-red)]" : "bg-[var(--accent-mint)]"}`}
+                  >
+                    {syncError ?? syncStatus}
+                  </div>
+                )}
                 <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <div className="rounded-xl border-[3px] border-black bg-[var(--accent-yellow)] px-4 py-3">
                     <p className="text-xs font-bold uppercase">Total Movies</p>
@@ -1690,10 +1962,10 @@ export default function Home() {
                     Clear Data
                   </button>
                   <button
-                    onClick={handleResetDemo}
+                    onClick={handleLoadDemoData}
                     className="brutal-button w-full bg-[var(--accent-blue)] px-4 py-3"
                   >
-                    Reset Demo Data
+                    Load Demo Data
                   </button>
                 </div>
               </div>
@@ -1728,21 +2000,9 @@ export default function Home() {
                       }))
                     }
                   />
-                </div>
-                <div>
-                  <label className="text-xs">RSS URL</label>
-                  <input
-                    value={settings.letterboxd.rssUrl}
-                    onChange={(event) =>
-                      setSettings((prev) => ({
-                        ...prev,
-                        letterboxd: {
-                          ...prev.letterboxd,
-                          rssUrl: event.target.value,
-                        },
-                      }))
-                    }
-                  />
+                  <p className="mt-1 text-xs font-semibold text-black/60">
+                    RSS auto: {letterboxdRssUrl || "https://letterboxd.com/yourname/rss/"}
+                  </p>
                 </div>
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border-[3px] border-black bg-[var(--accent-blue)] px-4 py-3">
                   <div>
@@ -1755,11 +2015,19 @@ export default function Home() {
                   </div>
                   <button
                     onClick={handleManualSync}
+                    disabled={isSyncing}
                     className="brutal-button bg-black px-3 py-2 text-white"
                   >
                     {isSyncing ? "Syncing..." : "Manual Sync"}
                   </button>
                 </div>
+                {(syncStatus || syncError) && (
+                  <div
+                    className={`rounded-lg border-[3px] px-3 py-2 text-xs font-bold uppercase ${syncError ? "bg-[var(--accent-red)]" : "bg-[var(--accent-mint)]"}`}
+                  >
+                    {syncError ?? syncStatus}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1820,6 +2088,22 @@ export default function Home() {
                       }))
                     }
                   />
+                </div>
+                <div className="flex items-center gap-2 sm:col-span-2">
+                  <input
+                    type="checkbox"
+                    checked={settings.aList.isActive}
+                    onChange={(event) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        aList: { ...prev.aList, isActive: event.target.checked },
+                      }))
+                    }
+                    className="h-5 w-5 accent-black"
+                  />
+                  <span className="text-sm font-bold uppercase">
+                    Membership active (bill subscription)
+                  </span>
                 </div>
                 <div className="flex flex-col justify-end">
                   <label className="text-xs">Months active</label>
@@ -1930,10 +2214,10 @@ export default function Home() {
                   Clear All Data
                 </button>
                 <button
-                  onClick={handleResetDemo}
+                  onClick={handleLoadDemoData}
                   className="brutal-button bg-[var(--accent-blue)] px-4 py-3"
                 >
-                  Reset Demo State
+                  Load Demo State
                 </button>
               </div>
             </div>
