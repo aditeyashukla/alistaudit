@@ -1,26 +1,124 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f5f5f0;
+  --foreground: #000000;
+  --accent-red: #ff6b6b;
+  --accent-blue: #4ecdc4;
+  --accent-yellow: #ffe66d;
+  --accent-lavender: #c7ceea;
+  --accent-mint: #95e1d3;
+  --accent-salmon: #ffa07a;
+  --border-thick: 4px;
+  --shadow-offset: 6px;
+  --font-space-grotesk: "Space Grotesk", "Work Sans", system-ui, -apple-system,
+    sans-serif;
+  --font-work-sans: "Work Sans", "Space Grotesk", system-ui, -apple-system,
+    sans-serif;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-sans: var(--font-work-sans);
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-work-sans);
+  letter-spacing: -0.01em;
+}
+
+.brutal-card {
+  border: var(--border-thick) solid #000;
+  box-shadow: var(--shadow-offset) var(--shadow-offset) 0 #000;
+  border-radius: 16px;
+  background: #ffffff;
+}
+
+.brutal-card.accent-red {
+  background: var(--accent-red);
+}
+
+.brutal-card.accent-blue {
+  background: var(--accent-blue);
+}
+
+.brutal-card.accent-yellow {
+  background: var(--accent-yellow);
+}
+
+.brutal-card.accent-lavender {
+  background: var(--accent-lavender);
+}
+
+.brutal-card.accent-mint {
+  background: var(--accent-mint);
+}
+
+.brutal-card.accent-salmon {
+  background: var(--accent-salmon);
+}
+
+.brutal-button {
+  border: 4px solid #000;
+  box-shadow: 4px 4px 0 #000;
+  border-radius: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  transition: transform 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
+}
+
+.brutal-button:active {
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0 #000;
+}
+
+input,
+select,
+textarea {
+  border: 3px solid #000;
+  border-radius: 10px;
+  box-shadow: 3px 3px 0 #000;
+  padding: 12px;
+  background: #ffffff;
+  font-weight: 600;
+  width: 100%;
+}
+
+label {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.dot-grid {
+  background-image: radial-gradient(#00000015 1.5px, transparent 1.5px);
+  background-size: 18px 18px;
+}
+
+@keyframes brutal-shake {
+  0% {
+    transform: translate(0, 0) rotate(-1deg) scale(1);
+  }
+  25% {
+    transform: translate(2px, -1px) rotate(1deg) scale(1.01);
+  }
+  50% {
+    transform: translate(-2px, 1px) rotate(-2deg) scale(1.02);
+  }
+  75% {
+    transform: translate(1px, 2px) rotate(2deg) scale(1.01);
+  }
+  100% {
+    transform: translate(-1px, 0) rotate(-1deg) scale(1.01);
+  }
+}
+
+.brutal-shake {
+  animation: brutal-shake 1.15s ease-in-out infinite;
+  display: inline-block;
+  transform-origin: center;
 }
