@@ -989,14 +989,14 @@ export default function Home() {
         await navigator.share({
           files: [file],
           title: shareTitle,
-          text: `${shareMessage} Track yours with A-List Audit.`,
+          text: `${shareMessage} Track yours with A-List Audit: https://alistauditvercel.vercel.app/`,
         });
         setShareStatus("Shared via your device share sheet.");
         scheduleCleanup();
       } else if (navigator.share) {
         await navigator.share({
           title: shareTitle,
-          text: `${shareMessage} Track yours with A-List Audit.`,
+          text: `${shareMessage} Track yours with A-List Audit: https://alistauditvercel.vercel.app/`,
           url: blobUrl,
         });
         setShareStatus("Shared via your device share sheet.");
