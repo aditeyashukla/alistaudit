@@ -51,6 +51,11 @@ Savings = (AMC Movies × Avg Ticket Price) - (Months Active × Monthly Fee)
 - Export data (CSV/JSON)
 - Clear data option in settings
 
+### 1.7 Shareable Savings Card
+- "Share my savings" entry point in the main header
+- Generate a Neubrutalist PNG sized for mobile with lifetime, yearly, and monthly savings
+- Use native share sheet when available; otherwise auto-download the PNG for social sharing
+
 ---
 
 ## 2. Technical Requirements

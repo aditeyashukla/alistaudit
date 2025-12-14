@@ -1,11 +1,10 @@
 "use client";
 
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { create } from "zustand";
 import {
   ArrowUpRight,
   BarChart3,
-  Check,
   Clapperboard,
   Download,
   Gauge,
@@ -13,8 +12,8 @@ import {
   ListChecks,
   Plus,
   RefreshCcw,
+  Share2,
   Settings2,
-  Sparkles,
   Ticket,
   Trash2,
   Wand2,
@@ -297,6 +296,20 @@ export default function Home() {
   });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isShareOpen, setIsShareOpen] = useState(false);
+  const [sharePeriod, setSharePeriod] = useState<Period>("lifetime");
+  const [sharePreview, setSharePreview] = useState<string | null>(null);
+  const [shareStatus, setShareStatus] = useState<string | null>(null);
+  const [isSharing, setIsSharing] = useState(false);
+  const shareCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  const latestAMCMovie = useMemo(() => {
+    const amc = movies.filter((movie) => movie.isAMC);
+    if (!amc.length) return null;
+    return [...amc].sort(
+      (a, b) => new Date(b.watchDate).getTime() - new Date(a.watchDate).getTime(),
+    )[0];
+  }, [movies]);
 
   const money = useMemo(
     () => moneyFormatter(settings.preferences.currency),
@@ -506,6 +519,371 @@ export default function Home() {
     target?.scrollIntoView({ behavior: "smooth" });
   };
 
+  const shareLabel = (period: Period) =>
+    period === "lifetime"
+      ? "Lifetime"
+      : period === "year"
+        ? "Past Year"
+        : "This Month";
+
+  const shareTarget = useMemo(
+    () =>
+      sharePeriod === "lifetime"
+        ? stats.lifetime
+        : sharePeriod === "year"
+          ? stats.yearly
+          : stats.monthly,
+    [sharePeriod, stats],
+  );
+
+  const getShareTone = (savings: number) => {
+    if (savings < 0) {
+      return {
+        headline: "YEOUCH! I think I got scammed by A-List",
+        subtitle: "Now I really hope I didn't buy too much popcorn",
+        subtitle_font:22
+      };
+    }
+    if (savings < 100) {
+      return {
+        headline: "Not bad! A membership that actually saved me some money",
+        subtitle: "",
+      };
+    }
+    return {
+      headline: "This is what it feels like to be the AMC A-List GOAT",
+      subtitle: "I'M A FUCKING CINEPHILE",
+    };
+  };
+
+  const shareTone = useMemo(
+    () => getShareTone(shareTarget.savings),
+    [shareTarget.savings],
+  );
+
+  const createShareImage = async () => {
+    const canvas = shareCanvasRef.current;
+    if (!canvas) return null;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+
+    const width = 1080;
+    const height = 1300;
+    const centerX = width / 2;
+    canvas.width = width;
+    canvas.height = height;
+    // shareTarget.savings
+    const tone = getShareTone(shareTarget.savings);
+
+    const palette = {
+      desk: "#e7dfd3",
+      paper: "#fffdf7",
+      paperEdge: "#d9d0c2",
+      ink: "#0f100f",
+      border: "#171717",
+      rule: "#ebe4d8",
+      margin: "#e3c9c9",
+      accentRed: "#ffe0dc",
+      accentBlue: "#dff3f0",
+      accentYellow: "#fff4d1",
+      accentMint: "#e5f3df",
+    };
+
+    const drawWrappedText = (
+      text: string,
+      x: number,
+      y: number,
+      maxWidth: number,
+      lineHeight: number,
+      align: CanvasTextAlign = "center",
+    ) => {
+      const previousAlign = ctx.textAlign;
+      ctx.textAlign = align;
+      const words = text.split(" ");
+      let line = "";
+      let currentY = y;
+      for (const word of words) {
+        const testLine = line ? `${line} ${word}` : word;
+        if (ctx.measureText(testLine).width > maxWidth) {
+          ctx.fillText(line, x, currentY);
+          line = word;
+          currentY += lineHeight;
+        } else {
+          line = testLine;
+        }
+      }
+      if (line) {
+        ctx.fillText(line, x, currentY);
+        currentY += lineHeight;
+      }
+      ctx.textAlign = previousAlign;
+      return currentY;
+    };
+
+    const drawRoundedRect = (
+      x: number,
+      y: number,
+      w: number,
+      h: number,
+      r: number,
+      fill: string,
+      strokeWidth = 8,
+      strokeColor = palette.border,
+    ) => {
+      const radius = Math.min(r, w / 2, h / 2);
+      ctx.beginPath();
+      ctx.moveTo(x + radius, y);
+      ctx.lineTo(x + w - radius, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+      ctx.lineTo(x + w, y + h - radius);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+      ctx.lineTo(x + radius, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+      ctx.lineTo(x, y + radius);
+      ctx.quadraticCurveTo(x, y, x + radius, y);
+      ctx.closePath();
+      ctx.fillStyle = fill;
+      ctx.fill();
+      if (strokeWidth > 0) {
+        ctx.lineWidth = strokeWidth;
+        ctx.strokeStyle = strokeColor;
+        ctx.stroke();
+      }
+    };
+
+    ctx.fillStyle = palette.desk;
+    ctx.fillRect(0, 0, width, height);
+
+    for (let i = 0; i < 280; i += 1) {
+      ctx.fillStyle = "rgba(0,0,0,0.04)";
+      ctx.fillRect(Math.random() * width, Math.random() * height, 1.1, 1.1);
+    }
+
+    const paper = {
+      x: 60,
+      y: 50,
+      w: width - 120,
+      h: height - 110,
+    };
+
+    ctx.save();
+    ctx.shadowColor = "rgba(0,0,0,0.15)";
+    ctx.shadowBlur = 22;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 14;
+    drawRoundedRect(paper.x, paper.y, paper.w, paper.h, 28, palette.paper, 3, palette.paperEdge);
+    ctx.restore();
+
+    // Ruled paper lines
+    ctx.strokeStyle = palette.rule;
+    ctx.lineWidth = 1.2;
+    for (let y = paper.y + 120; y < paper.y + paper.h - 100; y += 90) {
+      ctx.beginPath();
+      ctx.moveTo(paper.x + 50, y);
+      ctx.lineTo(paper.x + paper.w - 50, y);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = palette.margin;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(paper.x + paper.w * 0.16, paper.y + 100);
+    ctx.lineTo(paper.x + paper.w * 0.16, paper.y + paper.h - 90);
+    ctx.stroke();
+
+    // Torn spiral top
+    ctx.fillStyle = palette.desk;
+    for (let x = paper.x + 24; x < paper.x + paper.w - 40; x += 90) {
+      ctx.beginPath();
+      ctx.moveTo(x, paper.y + 6);
+      ctx.lineTo(x + 22, paper.y - 14);
+      ctx.lineTo(x + 44, paper.y + 6);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Spiral holes
+    const holeCount = 9;
+    const holeSpacing = paper.w / (holeCount + 1);
+    for (let i = 1; i <= holeCount; i += 1) {
+      const hx = paper.x + holeSpacing * i;
+      const hy = paper.y + 28;
+      ctx.beginPath();
+      ctx.fillStyle = "rgba(0,0,0,0.08)";
+      ctx.arc(hx + 1.5, hy + 1.5, 12, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.fillStyle = palette.desk;
+      ctx.arc(hx, hy, 12, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.strokeStyle = palette.paperEdge;
+      ctx.lineWidth = 2.4;
+      ctx.arc(hx, hy, 12, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = palette.ink;
+
+    const username =
+      (settings.letterboxd.username || "").replace(/^@/, "").trim() || "letterboxd";
+    const dateLabel = format(new Date(), "MMM d, yyyy");
+
+    let cursorY = paper.y + 150;
+    ctx.font = "900 54px 'Space Grotesk', 'Work Sans', sans-serif";
+    ctx.fillText("NOTICE OF A-LIST AUDIT", centerX, cursorY);
+    cursorY += 42;
+    ctx.font = "700 26px 'Work Sans', 'Space Grotesk', sans-serif";
+    ctx.fillText(`Date: ${dateLabel}  •  Letterboxd: @${username}`, centerX, cursorY);
+    cursorY += 68;
+
+    const blockX = paper.x + 90;
+    const blockW = paper.w - 180;
+
+    // Tone block
+    drawRoundedRect(blockX, cursorY, blockW, 260, 22, palette.accentBlue, 6, palette.border);
+    ctx.fillStyle = palette.ink;
+    ctx.font = "900 52px 'Space Grotesk', 'Work Sans', sans-serif";
+    drawWrappedText(tone.headline, centerX, cursorY + 94, blockW - 120, 52);
+    ctx.font = "700 22px 'Work Sans', 'Space Grotesk', sans-serif";
+    drawWrappedText(tone.subtitle, centerX, cursorY + 188, blockW - 140, 38);
+    cursorY += 280;
+
+    // Savings sentence
+    drawRoundedRect(blockX, cursorY, blockW, 180, 20, palette.accentYellow, 6, palette.border);
+    ctx.fillStyle = palette.ink;
+    ctx.font = "800 30px 'Work Sans', 'Space Grotesk', sans-serif";
+    drawWrappedText(
+      `In the ${shareLabel(sharePeriod).toLowerCase()}, using A-List has saved me`,
+      centerX,
+      cursorY + 64,
+      blockW - 140,
+      40,
+    );
+    ctx.font = "900 82px 'Space Grotesk', 'Work Sans', sans-serif";
+    ctx.fillText(money.format(shareTarget.savings), centerX, cursorY + 138);
+    cursorY += 200;
+
+    // AMC cost vs fee
+    drawRoundedRect(blockX, cursorY, blockW, 200, 20, palette.accentMint, 6, palette.border);
+    ctx.fillStyle = palette.ink;
+    ctx.font = "900 46px 'Space Grotesk', 'Work Sans', sans-serif";
+    ctx.fillText(`I went to AMC ${shareTarget.amcCount} times`, centerX, cursorY + 86);
+    ctx.font = "700 22px 'Work Sans', 'Space Grotesk', sans-serif";
+    drawWrappedText(
+      `which should've cost me ${money.format(shareTarget.ticketValue)} in tickets but the A-List membership actually cost me ${money.format(shareTarget.monthsActive * settings.aList.subscriptionCost)}`,
+      centerX,
+      cursorY + 128,
+      blockW - 160,
+      38,
+    );
+    cursorY += 230;
+
+    // Last visit
+    drawRoundedRect(blockX, cursorY, blockW, 140, 20, palette.accentRed, 6, palette.border);
+    ctx.fillStyle = palette.ink;
+    ctx.font = "900 42px 'Space Grotesk', 'Work Sans', sans-serif";
+    ctx.fillText("The last time I went to AMC", centerX, cursorY + 70);
+    ctx.font = "700 22px 'Work Sans', 'Space Grotesk', sans-serif";
+    const lastMovieText = latestAMCMovie
+      ? `was to watch "${latestAMCMovie.title}" on ${format(new Date(latestAMCMovie.watchDate), "MMM d, yyyy")}`
+      : "hasn't been logged yet.";
+    drawWrappedText(lastMovieText, centerX, cursorY + 112, blockW - 140, 38);
+    cursorY += 200;
+
+    // Perforation + footer
+    ctx.save();
+    ctx.setLineDash([16, 14]);
+    ctx.strokeStyle = palette.paperEdge;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(paper.x + 70, paper.y + paper.h - 70);
+    ctx.lineTo(paper.x + paper.w - 70, paper.y + paper.h - 70);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.fillStyle = palette.ink;
+    ctx.font = "800 22px 'Work Sans', 'Space Grotesk', sans-serif";
+    ctx.fillText(
+      "Made using My AMC A-List Audit",
+      centerX,
+      paper.y + paper.h - 30,
+    );
+
+    return canvas.toDataURL("image/png");
+  };
+
+  const refreshSharePreview = async () => {
+    if (!isShareOpen) return;
+    const url = await createShareImage();
+    if (url) setSharePreview(url);
+  };
+
+  useEffect(() => {
+    if (isShareOpen) {
+      void refreshSharePreview();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isShareOpen, sharePeriod, stats, settings.preferences.currency]);
+
+  const handleShare = async () => {
+    setIsSharing(true);
+    setShareStatus(null);
+    try {
+      const dataUrl = await createShareImage();
+      if (!dataUrl) {
+        setShareStatus("Could not build the share image. Try again.");
+        return;
+      }
+      setSharePreview(dataUrl);
+      const response = await fetch(dataUrl);
+      const blob = await response.blob();
+      const filename = `alist-audit-${sharePeriod}.png`;
+      const file = new File([blob], filename, { type: "image/png" });
+
+      const shareMessage =
+        sharePeriod === "lifetime"
+          ? `I've saved ${money.format(shareTarget.savings)} total with AMC A-List.`
+          : `I've saved ${money.format(shareTarget.savings)} in the ${shareLabel(sharePeriod).toLowerCase()}.`;
+
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: "My AMC A-List savings",
+          text: `${shareMessage} Track yours with A-List Audit.`,
+        });
+        setShareStatus("Shared via your device share sheet.");
+      } else {
+        const link = document.createElement("a");
+        link.href = dataUrl;
+        link.download = filename;
+        link.click();
+        setShareStatus("PNG downloaded — ready to drop into socials.");
+      }
+    } catch (error) {
+      console.error("Share failed", error);
+      setShareStatus("Share failed. Save the PNG and try again.");
+    } finally {
+      setIsSharing(false);
+    }
+  };
+
+  const openSharePanel = () => {
+    setIsShareOpen(true);
+    setSharePeriod(viewMode);
+    setShareStatus(null);
+    setTimeout(() => {
+      document.getElementById("share-panel")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 60);
+    void refreshSharePreview();
+  };
+
   const headerBadges = [
     // { label: "DID YOU KNOW YOU CAN BREAK EVEN AFTER JUST 2 MOVIES??\nok yeah buddy here's how much you actually ended up spending (or saving?) ", color: "bg-[var(--accent-blue)]" },
     // { label: "Firebase Hooks", color: "bg-[var(--accent-yellow)]" },
@@ -525,8 +903,8 @@ export default function Home() {
   ];
 
   return (
-    <div className="dot-grid min-h-screen bg-[var(--background)] px-4 py-8 text-black md:px-8 lg:px-16">
-      <div className="mx-auto flex max-w-6xl flex-col gap-8">
+    <div className="dot-grid min-h-screen overflow-x-hidden bg-[var(--background)] px-4 py-8 text-black md:px-8 lg:px-16">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-8">
         <div className="relative overflow-hidden rounded-2xl border-4 border-black bg-white p-6 shadow-[8px_8px_0_#000] md:p-8">
           <div className="absolute -left-8 -top-8 h-32 w-32 rotate-3 bg-[var(--accent-yellow)]" />
           <div className="absolute -right-10 -bottom-10 h-40 w-40 -rotate-2 bg-[var(--accent-blue)]" />
@@ -539,13 +917,14 @@ export default function Home() {
                 >
                   <span className="relative inline-flex flex-wrap items-center justify-center gap-3 rounded-2xl border-[6px] border-black bg-white px-5 py-3 shadow-[10px_10px_0_#000]">
                     <span className="text-4xl font-black leading-tight sm:text-5xl">
-                      My A-List
+                      My AMC A-List
                     </span>
-                    <span className="inline-block rounded-xl border-[5px] border-black bg-[var(--accent-salmon)] px-4 py-2 text-4xl font-black leading-none shadow-[6px_6px_0_#000] sm:text-6xl">
+                    <span className="brutal-shake inline-block rounded-xl border-[5px] border-black bg-[var(--accent-yellow)] px-4 py-2 text-4xl font-black leading-none shadow-[6px_6px_0_#000] sm:text-6xl">
                       Audit
                     </span>
                   </span>
                 </h1>
+                
                 {/* <div className="flex items-center gap-2 rounded-full border-[3px] border-black bg-black px-3 py-1 text-white">
                   <Sparkles size={16} />
                   <span className="text-sm font-bold">Neubrutalist</span>
@@ -555,7 +934,7 @@ export default function Home() {
                 DID YOU KNOW YOU CAN BREAK EVEN AFTER JUST 2 MOVIES?? ok yeah buddy here's how much you actually ended up spending (or saving?) 
               </p> */}
             </div>
-            <div className="flex flex-wrap justify-center gap-3">
+            <div className="flex flex-wrap gap-3">
               {headerBadges.map((badge) => (
                 <span
                   key={badge.label}
@@ -565,7 +944,7 @@ export default function Home() {
                 </span>
               ))}
             </div>
-            <div className="flex flex-wrap items-center justify-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               {tabs.map((tab) => {
                 const Icon = tab.icon;
                 const isActive = activeTab === tab.id;
@@ -582,6 +961,15 @@ export default function Home() {
                   </button>
                 );
               })}
+              <button
+                onClick={openSharePanel}
+                className="brutal-button bg-[var(--accent-yellow)] px-4 py-3 sm:ml-auto"
+              >
+                {/* <Share2 size={12} /> */}
+                <span className="text-sm font-extrabold uppercase">
+                  Share my savings!!
+                </span>
+              </button>
               {/* <div className="ml-auto flex items-center gap-2 rounded-full border-[3px] border-black bg-[var(--accent-yellow)] px-3 py-2 text-xs font-bold uppercase tracking-wide">
                 <Check size={14} />
                 Offline-ready cache preview
@@ -590,9 +978,130 @@ export default function Home() {
           </div>
         </div>
 
+        {isShareOpen && (
+          <div
+            id="share-panel"
+            className="brutal-card accent-mint relative overflow-hidden p-6 sm:p-8"
+          >
+            <div className="absolute -left-8 top-4 h-24 w-24 -rotate-6 bg-[var(--accent-yellow)]" />
+            <div className="absolute -right-10 bottom-4 h-28 w-28 rotate-6 bg-[var(--accent-red)]" />
+            <div className="relative grid grid-cols-1 gap-6 md:grid-cols-[1.1fr_0.9fr]">
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-center gap-3">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-[0.14em]">
+                      Share-ready
+                    </p>
+                    <h3 className="text-2xl font-black">Audit Receipt</h3>
+                  </div>
+                  <button
+                    onClick={() => setIsShareOpen(false)}
+                    className="brutal-button bg-white px-3 py-2 text-xs"
+                  >
+                    Close
+                  </button>
+                </div>
+                <p className="max-w-2xl text-sm font-semibold text-black/80">
+                  Generate a receipt image with your {shareLabel(sharePeriod).toLowerCase()} savings along with other statistics.
+                </p>
+                <div className="rounded-xl border-[3px] border-black bg-white px-4 py-3">
+                  <p className="text-lg font-black leading-tight">{shareTone.headline}</p>
+                  <p className="text-sm font-semibold text-black/70">{shareTone.subtitle}</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {viewModes.map((mode) => (
+                    <button
+                      key={`share-${mode.value}`}
+                      onClick={() => {
+                        setSharePeriod(mode.value);
+                        setShareStatus(null);
+                      }}
+                      className={`brutal-button px-3 py-2 text-xs ${sharePeriod === mode.value ? "bg-black text-white" : "bg-white"}`}
+                    >
+                      {mode.label}
+                    </button>
+                  ))}
+                  <span className="rounded-full border-[3px] border-black bg-white px-3 py-1 text-xs font-bold uppercase">
+                    {money.format(shareTarget.savings)} net savings
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <div className="rounded-xl border-[3px] border-black bg-white px-4 py-3">
+                    <p className="text-xs font-bold uppercase">
+                      {shareLabel(sharePeriod)} saved
+                    </p>
+                    <p className="text-2xl font-black">{money.format(shareTarget.savings)}</p>
+                    <p className="text-sm font-semibold text-black/70">
+                      {shareTarget.amcCount} AMC trips
+                    </p>
+                  </div>
+                  <div className="rounded-xl border-[3px] border-black bg-white px-4 py-3">
+                    <p className="text-xs font-bold uppercase">Avg per movie</p>
+                    <p className="text-2xl font-black">
+                      {money.format(stats.avgSavingsPerMovie || 0)}
+                    </p>
+                    <p className="text-sm font-semibold text-black/70">
+                      {stats.totalAMCMovies} AMC movies total
+                    </p>
+                  </div>
+                  <div className="rounded-xl border-[3px] border-black bg-white px-4 py-3">
+                    <p className="text-xs font-bold uppercase">Utilization</p>
+                    <p className="text-2xl font-black">{stats.utilizationRate.toFixed(0)}%</p>
+                    <p className="text-sm font-semibold text-black/70">
+                      {stats.weeklyFreeUsed}/{weeklyQuota} this week
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={handleShare}
+                    disabled={isSharing}
+                    className="brutal-button bg-black px-4 py-3 text-white"
+                  >
+                    {isSharing ? "Sharing..." : "Share / Save PNG"}
+                  </button>
+                  <button
+                    onClick={refreshSharePreview}
+                    disabled={isSharing}
+                    className="brutal-button bg-white px-4 py-3"
+                  >
+                    Refresh preview
+                  </button>
+                  {/* <span className="text-xs font-bold uppercase">
+                    1080×1920 • Neubrutalist textures
+                  </span> */}
+                </div>
+                <div className="rounded-xl border-[3px] border-black bg-white px-4 py-3 text-sm font-semibold">
+                  {shareStatus ?? "Hold image to share receipts to apps, if it isn't too embarassing for you."}
+                </div>
+              </div>
+              <div className="flex justify-center md:justify-end">
+                <div className="w-full max-w-[420px] bg-white p-3" style={{
+                  background:"transparent"
+                }}>
+                  {sharePreview ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={sharePreview}
+                      alt="Share preview"
+                      className="h-auto w-full rounded-lg border-[4px] border-black shadow-[8px_8px_0_#000]"
+                    />
+                  ) : (
+                    <div className="flex h-full min-h-[320px] items-center justify-center rounded-lg border-[3px] border-dashed border-black bg-white/60 p-4 text-center text-sm font-semibold">
+                      Tap share to build a brutalist PNG with your stats.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <canvas ref={shareCanvasRef} className="hidden" aria-hidden />
+
         {activeTab === "dashboard" && (
-          <div className="grid gap-6 lg:grid-cols-3">
-            <div className="brutal-card accent-red relative col-span-2 overflow-hidden p-6 sm:p-8">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <div className="brutal-card accent-red relative overflow-hidden p-6 sm:p-8 lg:col-span-2">
               <div className="absolute right-10 top-6 -rotate-6 rounded-full bg-black px-3 py-1 text-xs font-black uppercase text-white">
                 {viewMode}
               </div>
@@ -644,7 +1153,7 @@ export default function Home() {
                     </div>
                   </div>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <div className="rounded-xl border-[3px] border-black bg-white px-4 py-3">
                     <p className="text-xs font-bold uppercase">Monthly Savings</p>
                     <p className="text-2xl font-black">
@@ -782,7 +1291,7 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="brutal-card col-span-2 p-6 sm:p-8">
+            <div className="brutal-card p-6 sm:p-8 lg:col-span-2">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.14em]">
@@ -792,7 +1301,7 @@ export default function Home() {
                 </div>
                 <Gauge size={26} className="stroke-[3px]" />
               </div>
-              <div className="mt-4 grid gap-4 sm:grid-cols-3">
+              <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div className="rounded-xl border-[3px] border-black bg-[var(--accent-blue)] px-4 py-3">
                   <p className="text-xs font-bold uppercase">Avg / Month</p>
                   <p className="text-2xl font-black">
@@ -825,7 +1334,7 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="brutal-card col-span-2 p-6">
+            <div className="brutal-card p-6 lg:col-span-2">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.14em]">
@@ -835,7 +1344,7 @@ export default function Home() {
                 </div>
                 <ListChecks size={26} className="stroke-[3px]" />
               </div>
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {recentActivity.map((movie) => (
                   <div
                     key={movie.id}
@@ -907,7 +1416,7 @@ export default function Home() {
         )}
 
         {activeTab === "movies" && (
-          <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.1fr_0.9fr]">
             <div className="space-y-4">
               <div className="brutal-card p-6">
                 <div className="flex flex-wrap items-center justify-between gap-3">
@@ -925,7 +1434,7 @@ export default function Home() {
                     Pull Letterboxd
                   </button>
                 </div>
-                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <div className="rounded-xl border-[3px] border-black bg-[var(--accent-yellow)] px-4 py-3">
                     <p className="text-xs font-bold uppercase">Total Movies</p>
                     <p className="text-2xl font-black">{movies.length}</p>
@@ -1016,7 +1525,7 @@ export default function Home() {
                         type="checkbox"
                         checked={selectedIds.has(movie.id)}
                         onChange={() => handleToggleSelection(movie.id)}
-                        className="h-5 w-5 accent-black"
+                        className="h-4 w-4 shrink-0 accent-black sm:h-5 sm:w-5"
                       />
                       <div className="flex h-12 w-12 items-center justify-center rounded-xl border-[3px] border-black bg-[var(--accent-yellow)]">
                         <Clapperboard size={20} className="stroke-[3px]" />
@@ -1028,7 +1537,9 @@ export default function Home() {
                           {movie.addedManually && " • Manual"}
                         </p>
                         <div className="mt-1 flex flex-wrap gap-2 text-xs font-bold uppercase">
-                          <span className="rounded-full border-2 border-black bg-[var(--accent-blue)] px-2 py-1">
+                          <span
+                            className={`rounded-full border-2 border-black px-2 py-1 ${movie.isAMC ? "bg-[var(--accent-blue)]" : "bg-white"}`}
+                          >
                             {movie.isAMC ? "AMC" : "Not AMC"}
                           </span>
                           {movie.rating && (
@@ -1057,7 +1568,7 @@ export default function Home() {
                         onClick={() => handleToggleAMC(movie.id)}
                         className={`brutal-button px-3 py-2 text-xs ${movie.isAMC ? "bg-[var(--accent-blue)]" : "bg-white"}`}
                       >
-                        Toggle AMC
+                        Used A-List
                       </button>
                     </div>
                   </div>
@@ -1091,7 +1602,7 @@ export default function Home() {
                       placeholder="Movie title"
                     />
                   </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div>
                       <label className="text-xs">Watch date</label>
                       <input
@@ -1191,7 +1702,7 @@ export default function Home() {
         )}
 
         {activeTab === "settings" && (
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <div className="brutal-card p-6 sm:p-8">
               <div className="flex items-center justify-between">
                 <div>
@@ -1262,7 +1773,7 @@ export default function Home() {
                 </div>
                 <Ticket size={24} className="stroke-[3px]" />
               </div>
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
                   <label className="text-xs">Monthly fee</label>
                   <input
@@ -1329,7 +1840,7 @@ export default function Home() {
                 </div>
                 <Settings2 size={24} className="stroke-[3px]" />
               </div>
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
                   <label className="text-xs">Default view</label>
                   <select
@@ -1399,7 +1910,7 @@ export default function Home() {
                 </div>
                 <Trash2 size={24} className="stroke-[3px]" />
               </div>
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <button
                   onClick={() => handleExport("json")}
                   className="brutal-button bg-white px-4 py-3"
@@ -1439,9 +1950,9 @@ export default function Home() {
               </div>
               <div className="mt-4 space-y-2 text-sm font-semibold">
                 <p>Version: 0.2.0 (web demo)</p>
-                <p>Design: Neubrutalism with chunky borders and offset shadows.</p>
-                <p>Backend targets: Firebase Auth + Firestore, Letterboxd RSS.</p>
-                <p>Export-ready for CSV/JSON; manual data reset supported.</p>
+                <p>Designed by Aditeya Shukla</p>
+                <p>Just for funsies</p>
+                
               </div>
             </div>
           </div>
